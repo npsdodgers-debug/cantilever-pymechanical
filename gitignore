@@ -1,0 +1,47 @@
+# Ansys project files
+*.mechdb
+*.mechdb.lock
+*.rst
+*.rth
+*.esav
+*.osav
+*.db
+*.log
+*.out
+*.err
+*.mntr
+*.stat
+*.BCS
+*.ce
+*.emat
+*.full
+*.mlv
+*.mode
+*.pcs
+*.r001
+*.rdsp
+*.rfrq
+
+# Ansys scratch/temp folders
+solve.out
+cleanup-journal.wbjn
+_ProjectScratch/
+dp0/
+user_files/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Large data files (commit selectively)
+*.csv
+
+# Output images (commit selectively)
+*.png
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
