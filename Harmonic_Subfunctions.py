@@ -305,7 +305,7 @@ result
 def setup_harmonic_analysis(config, mechanical):
     f_start = float(config.get("f_start_hz", 8000.0))
     f_end   = float(config.get("f_end_hz",   12000.0))
-    n_steps = 10
+    n_steps = int(config.get("n_points", 10))
 
     script = f"""
 from System.Collections.Generic import List
@@ -623,3 +623,71 @@ result
 """
     out = mechanical.run_python_script(script)
     print(f"Mechanical says ({ns_name}):", out)
+
+def run_modal_analysis(config, mechanical):
+    """
+    Run a modal analysis, print the natural frequencies, and save them to
+    modal_frequencies.json in the output directory so plot_frf.py can read them.
+    """
+    script = """
+import json
+from Ansys.Mechanical.DataModel.Enums import DataModelObjectCategory
+
+model = Model
+
+# Add modal analysis
+modal = model.AddModalAnalysis()
+settings = modal.AnalysisSettings
+settings.MaximumModesToFind = 10
+
+modal.Activate()
+
+# Apply fixed support from existing named selection
+ns = None
+for n in model.NamedSelections.Children:
+    if n.Name == "NS_SUPPORT_FACE":
+        ns = n
+        break
+
+if ns is None:
+    raise RuntimeError("NS_SUPPORT_FACE not found - run fixed support setup first")
+
+fixed = modal.AddFixedSupport()
+fixed.Location = ns
+
+# Add a TotalDeformation result for each mode so frequencies are accessible
+for mode in range(1, settings.MaximumModesToFind + 1):
+    td = modal.Solution.AddTotalDeformation()
+    td.Mode = mode
+
+# Solve
+modal.Solution.Solve()
+
+# Extract frequencies from the TotalDeformation results
+freq_results = modal.Solution.GetChildren(
+    DataModelObjectCategory.TotalDeformation, True
+)
+
+freq_values = []
+lines = []
+for i in range(freq_results.Count):
+    freq = freq_results[i].ReportedFrequency.Value
+    freq_values.append(freq)
+    lines.append("Mode " + str(i+1) + ": " + str(freq) + " Hz")
+
+result = json.dumps({"frequencies_hz": freq_values, "lines": lines})
+result
+"""
+    out = mechanical.run_python_script(script)
+    data = __import__("json").loads(out)
+
+    print("Mechanical says (modal):")
+    for line in data["lines"]:
+        print(" ", line)
+
+    # Save frequencies to JSON for use by plot_frf.py
+    import json, os
+    json_path = os.path.join(config["output_dir"], "modal_frequencies.json")
+    with open(json_path, "w") as f:
+        json.dump({"frequencies_hz": data["frequencies_hz"]}, f, indent=4)
+    print(f"Modal frequencies saved to {json_path}")

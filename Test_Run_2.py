@@ -20,6 +20,7 @@ from Harmonic_Subfunctions import (
     export_complex_displacement,
     get_top_face_nodes,
     select_node_by_id,
+    run_modal_analysis,
 )
 
 if __name__ == "__main__":
@@ -31,9 +32,9 @@ if __name__ == "__main__":
         "element_size": 1.6e-3,          # meters
 
         # ── Harmonic analysis ─────────────────────────────────────────────────
-        "f_start_hz": 8000.0,
-        "f_end_hz":   12000.0,
-        "n_points":   11,
+        "f_start_hz": 100.0,
+        "f_end_hz":   5000.0,
+        "n_points":   20,
 
         # ── Force ─────────────────────────────────────────────────────────────
         "force_value_N":           1.0,  # amplitude, Y-direction
@@ -96,12 +97,15 @@ ns = model.AddNamedSelection()
 ns.Name = "NS_SUPPORT_FACE"
 ns.Location = sel_info
 ns.Generate()
-result = "OK: NS_SUPPORT_FACE created with " + str(len({support_node_ids})) + " nodes"
+result = "OK: NS_SUPPORT_FACE created with " + str(len(support_node_ids)) + " nodes"
 result
 """
     out = mech.run_python_script(create_support_ns_script)
     print("Mechanical says (support NS):", out)
     add_fixed_on_support_face(config, mech)
+
+    # ── Modal analysis to find natural frequencies ────────────────────────────
+    run_modal_analysis(config, mech)
 
     # ── Pick the tip node on the top face (max Z) ─────────────────────────────
     top_nodes = get_top_face_nodes(mech)
