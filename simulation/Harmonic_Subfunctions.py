@@ -723,7 +723,11 @@ def apply_damage_apdl(config, mechanical):
     K_reduced  = E_reduced / (3.0 * (1.0 - 2.0 * nu))
     G_reduced  = E_reduced / (2.0 * (1.0 + nu))
     out_dir    = config.get("output_dir", r"C:\Users\coetech\Documents\PyMechanical\Outputs")
-    xml_path   = os.path.join(out_dir, "DamageMaterial.xml")
+
+    # Use a unique material name per run to avoid "Unable to import" errors
+    # when Mechanical already has a DamageMaterial from a previous run.
+    mat_label  = f"DamageMaterial_loc{int(damage_location_frac*100):03d}_sev{int(damage_severity*100):03d}"
+    xml_path   = os.path.join(out_dir, f"{mat_label}.xml")
 
     # ── Build DamageMaterial XML by extracting Structural Steel from the
     #    official Ansys material library (guarantees correct import format) ────
@@ -746,8 +750,8 @@ def apply_damage_apdl(config, mechanical):
     if ss_material is None:
         raise RuntimeError("Structural Steel not found in General_Materials.xml")
 
-    # Change name
-    ss_material.find("BulkDetails/Name").text = "DamageMaterial"
+    # Change name to a unique label for this run
+    ss_material.find("BulkDetails/Name").text = mat_label
 
     # Change Young's Modulus (pa19), Bulk Modulus (pa21), Shear Modulus (pa22)
     # in the Isotropic Elasticity PropertyData (the one with "Derive from" qualifier)
@@ -833,31 +837,16 @@ ns_dmg.GenerationCriteria[1].Value      = Quantity(str(z_dmg_max) + " [mm]")
 ns_dmg.Generate()
 n_damaged = ns_dmg.Entities.Count if hasattr(ns_dmg, "Entities") else -1
 
-# Import DamageMaterial. On repeat calls this may create "DamageMaterial (2)"
-# etc. since Material.Delete() is not available in PyMechanical 0.11.0.
-# We track the name by finding the last entry that starts with "DamageMaterial".
-before_names = set(m.Name for m in Model.Materials.Children)
+# Each run uses a unique material name so there are no import collisions.
 Model.Materials.Import(r"{xml_path}")
-after_names = set(m.Name for m in Model.Materials.Children)
 
-# Prefer a newly added name; fall back to any DamageMaterial* entry
-new_names = after_names - before_names
-dm_name = None
-for name in new_names:
-    if name.startswith("DamageMaterial"):
-        dm_name = name
-        break
-if dm_name is None:
-    for m in Model.Materials.Children:
-        if m.Name.startswith("DamageMaterial"):
-            dm_name = m.Name  # keep iterating to get the last one
-
-# Assign the correct DamageMaterial to NS_DAMAGE_ELEMENTS
+# Assign the material to NS_DAMAGE_ELEMENTS
 existing_mas = Model.Materials.GetChildren(DataModelObjectCategory.MaterialAssignment, True)
 for ma in list(existing_mas):
     if ma.Name == "DamageMaterialAssignment":
         ma.Delete()
 
+dm_name = "{mat_label}"
 mat_assign = Model.Materials.AddMaterialAssignment()
 mat_assign.Name = "DamageMaterialAssignment"
 mat_assign.Location = ns_dmg
