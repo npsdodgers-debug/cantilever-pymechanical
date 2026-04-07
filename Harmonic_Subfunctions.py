@@ -10,7 +10,9 @@ import textwrap
 def setup_session_and_model(config):
     geometry_path = config["geometry_path"]
 
-    mechanical = launch_mechanical(batch=False)
+    # show_gui=True opens the Mechanical GUI; False runs headless (batch mode)
+    show_gui = config.get("show_gui", False)
+    mechanical = launch_mechanical(batch=not show_gui)
     proj_dir = mechanical.project_directory
 
     source_geom = geometry_path
@@ -691,3 +693,246 @@ result
     with open(json_path, "w") as f:
         json.dump({"frequencies_hz": data["frequencies_hz"]}, f, indent=4)
     print(f"Modal frequencies saved to {json_path}")
+
+# =============================================================================
+# Damage simulation helpers
+# =============================================================================
+
+def apply_damage_apdl(config, mechanical):
+    """
+    Simulate damage by:
+      1. Exporting Structural Steel XML from Mechanical (guaranteed correct format)
+      2. Modifying name and Young's modulus in Python, then saving as DamageMaterial.xml
+      3. Creating a Named Selection of damage zone elements via GenerationCriteria worksheet
+      4. Importing DamageMaterial and assigning it to the Named Selection
+
+    Config keys:
+      - damage_location_frac: center of damage as fraction of beam length (e.g. 0.75)
+      - damage_zone_frac:     width of damage zone as fraction of beam length (e.g. 0.05)
+      - damage_severity:      fraction of E to REMOVE (e.g. 0.25 = 25% reduction)
+    """
+    import os
+
+    damage_location_frac = float(config.get("damage_location_frac", 0.75))
+    damage_zone_frac     = float(config.get("damage_zone_frac", 0.05))
+    damage_severity      = float(config.get("damage_severity", 0.25))
+
+    E_original = 200e9
+    E_reduced  = E_original * (1.0 - damage_severity)
+    nu         = 0.3
+    K_reduced  = E_reduced / (3.0 * (1.0 - 2.0 * nu))
+    G_reduced  = E_reduced / (2.0 * (1.0 + nu))
+    out_dir    = config.get("output_dir", r"C:\Users\coetech\Documents\PyMechanical\Outputs")
+    xml_path   = os.path.join(out_dir, "DamageMaterial.xml")
+
+    # ── Build DamageMaterial XML by extracting Structural Steel from the
+    #    official Ansys material library (guarantees correct import format) ────
+    import xml.etree.ElementTree as ET
+
+    lib_path = (
+        r"C:\Program Files\ANSYS Inc\v252\Addins\EngineeringData\Samples\General_Materials.xml"
+    )
+    lib_tree = ET.parse(lib_path)
+    lib_root = lib_tree.getroot()
+    matml_doc = lib_root.find(".//MatML_Doc")
+
+    # Find the Structural Steel <Material> element
+    ss_material = None
+    for mat_elem in matml_doc.findall("Material"):
+        name_elem = mat_elem.find("BulkDetails/Name")
+        if name_elem is not None and name_elem.text == "Structural Steel":
+            ss_material = mat_elem
+            break
+    if ss_material is None:
+        raise RuntimeError("Structural Steel not found in General_Materials.xml")
+
+    # Change name
+    ss_material.find("BulkDetails/Name").text = "DamageMaterial"
+
+    # Change Young's Modulus (pa19), Bulk Modulus (pa21), Shear Modulus (pa22)
+    # in the Isotropic Elasticity PropertyData (the one with "Derive from" qualifier)
+    for prop in ss_material.findall("BulkDetails/PropertyData"):
+        derive_from = any(
+            q.get("name") == "Derive from" for q in prop.findall("Qualifier")
+        )
+        if derive_from:
+            for pv in prop.findall("ParameterValue"):
+                pid = pv.get("parameter")
+                data = pv.find("Data")
+                if pid == "pa19" and data is not None:
+                    data.text = str(E_reduced)
+                elif pid == "pa21" and data is not None:
+                    data.text = str(K_reduced)
+                elif pid == "pa22" and data is not None:
+                    data.text = str(G_reduced)
+            break
+
+    # Build new minimal XML: one material + full Metadata
+    new_root = ET.Element("EngineeringData")
+    new_root.set("version",     lib_root.get("version",     "19.4.0.79"))
+    new_root.set("versiondate", lib_root.get("versiondate", "6/9/2017 12:12:00 PM"))
+    ET.SubElement(new_root, "Notes").text = "\n  "
+    materials_elem = ET.SubElement(new_root, "Materials")
+    new_matml = ET.SubElement(materials_elem, "MatML_Doc")
+    new_matml.append(ss_material)
+    metadata = matml_doc.find("Metadata")
+    if metadata is not None:
+        new_matml.append(metadata)
+
+    ET.indent(new_root, space="  ")
+    new_tree = ET.ElementTree(new_root)
+    new_tree.write(xml_path, encoding="unicode", xml_declaration=True)
+    print(f"DamageMaterial XML written: E={E_reduced:.3e} Pa, K={K_reduced:.3e} Pa, G={G_reduced:.3e} Pa")
+
+    # ── Step 3 & 4: Create NS, import material, assign ───────────────────────
+    script = f"""
+import json
+from Ansys.Mechanical.DataModel.Enums import (
+    DataModelObjectCategory, GeometryDefineByType,
+    SelectionActionType, SelectionCriterionType,
+    SelectionOperatorType, SelectionType
+)
+
+# Compute damage zone bounds from mesh (coordinates are in mm)
+mesh_data = Model.Analyses[0].MeshData
+all_nodes = mesh_data.Nodes
+z_vals = [n.Z for n in all_nodes]
+z_min_beam = min(z_vals)
+z_max_beam = max(z_vals)
+beam_length = z_max_beam - z_min_beam
+
+damage_center = z_min_beam + {damage_location_frac} * beam_length
+half_width    = 0.5 * {damage_zone_frac} * beam_length
+z_dmg_min     = damage_center - half_width
+z_dmg_max     = damage_center + half_width
+
+# Create Named Selection via GenerationCriteria worksheet
+ns_container = Model.NamedSelections
+for ns in list(ns_container.Children):
+    if ns.Name == "NS_DAMAGE_ELEMENTS":
+        ns.Delete()
+
+ns_dmg = ns_container.AddNamedSelection()
+ns_dmg.Name = "NS_DAMAGE_ELEMENTS"
+ns_dmg.ScopingMethod = GeometryDefineByType.Worksheet
+
+ns_dmg.GenerationCriteria.Add(None)
+ns_dmg.GenerationCriteria[0].Action     = SelectionActionType.Add
+ns_dmg.GenerationCriteria[0].EntityType = SelectionType.MeshElement
+ns_dmg.GenerationCriteria[0].Criterion  = SelectionCriterionType.LocationZ
+ns_dmg.GenerationCriteria[0].Operator   = SelectionOperatorType.GreaterThanOrEqual
+ns_dmg.GenerationCriteria[0].Value      = Quantity(str(z_dmg_min) + " [mm]")
+
+ns_dmg.GenerationCriteria.Add(None)
+ns_dmg.GenerationCriteria[1].Action     = SelectionActionType.Filter
+ns_dmg.GenerationCriteria[1].EntityType = SelectionType.MeshElement
+ns_dmg.GenerationCriteria[1].Criterion  = SelectionCriterionType.LocationZ
+ns_dmg.GenerationCriteria[1].Operator   = SelectionOperatorType.LessThanOrEqual
+ns_dmg.GenerationCriteria[1].Value      = Quantity(str(z_dmg_max) + " [mm]")
+
+ns_dmg.Generate()
+n_damaged = ns_dmg.Entities.Count if hasattr(ns_dmg, "Entities") else -1
+
+# Import DamageMaterial. On repeat calls this may create "DamageMaterial (2)"
+# etc. since Material.Delete() is not available in PyMechanical 0.11.0.
+# We track the name by finding the last entry that starts with "DamageMaterial".
+before_names = set(m.Name for m in Model.Materials.Children)
+Model.Materials.Import(r"{xml_path}")
+after_names = set(m.Name for m in Model.Materials.Children)
+
+# Prefer a newly added name; fall back to any DamageMaterial* entry
+new_names = after_names - before_names
+dm_name = None
+for name in new_names:
+    if name.startswith("DamageMaterial"):
+        dm_name = name
+        break
+if dm_name is None:
+    for m in Model.Materials.Children:
+        if m.Name.startswith("DamageMaterial"):
+            dm_name = m.Name  # keep iterating to get the last one
+
+# Assign the correct DamageMaterial to NS_DAMAGE_ELEMENTS
+existing_mas = Model.Materials.GetChildren(DataModelObjectCategory.MaterialAssignment, True)
+for ma in list(existing_mas):
+    if ma.Name == "DamageMaterialAssignment":
+        ma.Delete()
+
+mat_assign = Model.Materials.AddMaterialAssignment()
+mat_assign.Name = "DamageMaterialAssignment"
+mat_assign.Location = ns_dmg
+mat_assign.Material = dm_name
+
+result = json.dumps({{
+    "beam_length_mm":     round(beam_length, 3),
+    "damage_center_mm":   round(damage_center, 3),
+    "z_dmg_min_mm":       round(z_dmg_min, 3),
+    "z_dmg_max_mm":       round(z_dmg_max, 3),
+    "n_damaged_elements": n_damaged,
+    "E_reduced_Pa":       {E_reduced},
+    "material_name":      dm_name
+}})
+result
+"""
+    out = mechanical.run_python_script(script)
+    import json
+    info = json.loads(out)
+    print(f"Damage applied: center={info['damage_center_mm']:.1f} mm, "
+          f"zone=[{info['z_dmg_min_mm']:.1f}, {info['z_dmg_max_mm']:.1f}] mm, "
+          f"material='{info['material_name']}', E_reduced={info['E_reduced_Pa']:.3e} Pa")
+    return info
+
+
+def remove_damage_apdl(mechanical):
+    """
+    Remove the DamageMaterialAssignment and NS_DAMAGE_ELEMENTS named selection,
+    reverting elements to Structural Steel.
+    Note: Material.Delete() is not available in PyMechanical 0.11.0, so
+    DamageMaterial entries accumulate in the materials list but are harmless
+    once the assignment is removed.
+    """
+    script = """
+from Ansys.Mechanical.DataModel.Enums import DataModelObjectCategory
+existing_mas = Model.Materials.GetChildren(DataModelObjectCategory.MaterialAssignment, True)
+for ma in list(existing_mas):
+    if ma.Name == "DamageMaterialAssignment":
+        ma.Delete()
+
+for ns in list(Model.NamedSelections.Children):
+    if ns.Name == "NS_DAMAGE_ELEMENTS":
+        ns.Delete()
+
+result = "OK: damage assignment and named selection removed"
+result
+"""
+    out = mechanical.run_python_script(script)
+    print("Mechanical says (remove damage):", out)
+
+
+def append_to_dataset(config, temp_csv_name, dataset_csv_path, damage_location_mm, damage_severity, label):
+    """
+    Read a single-run CSV (written by export_complex_displacement) and append
+    its rows to the combined dataset CSV, adding label columns.
+    If the dataset CSV does not exist yet, write the header first.
+    """
+    import csv, os
+
+    temp_csv = os.path.join(config["output_dir"], temp_csv_name)
+
+    write_header = not os.path.exists(dataset_csv_path)
+
+    with open(temp_csv, newline="") as src, open(dataset_csv_path, "a", newline="") as dst:
+        reader = csv.DictReader(src)
+        fieldnames = reader.fieldnames + ["damage_location_mm", "damage_severity", "label"]
+        writer = csv.DictWriter(dst, fieldnames=fieldnames)
+
+        if write_header:
+            writer.writeheader()
+
+        for row in reader:
+            row["damage_location_mm"] = damage_location_mm
+            row["damage_severity"]    = damage_severity
+            row["label"]              = label
+            writer.writerow(row)
+
+    print(f"Appended {label} data (damage_loc={damage_location_mm} mm) to dataset: {dataset_csv_path}")

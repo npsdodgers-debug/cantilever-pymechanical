@@ -1,26 +1,22 @@
 from ansys.mechanical.core import launch_mechanical
-import os, shutil, textwrap
-import json
+import os, json
 
 from Harmonic_Subfunctions import (
     setup_session_and_model,
     check_body_material,
     setup_mesh,
     check_model_info,
-    export_geometry_image,
     setup_harmonic_analysis,
     add_fixed_on_support_face,
     add_nodal_force,
-    select_face_by_centroid_generic,
-    export_bc_view,
-    solve_model,
-    print_solve_output,
-    save_project,
-    close_mechanical,
-    export_complex_displacement,
-    get_top_face_nodes,
     select_node_by_id,
-    run_modal_analysis,
+    get_top_face_nodes,
+    solve_model,
+    export_complex_displacement,
+    close_mechanical,
+    apply_damage_apdl,
+    remove_damage_apdl,
+    append_to_dataset,
 )
 
 if __name__ == "__main__":
@@ -37,21 +33,24 @@ if __name__ == "__main__":
         "n_points":   20,
 
         # ── Force ─────────────────────────────────────────────────────────────
-        "force_value_N":           1.0,  # amplitude, Y-direction
-        "remote_named_selection":  "FORCE_NODE",
-        
+        "force_value_N":          1.0,
+        "remote_named_selection": "FORCE_NODE",
 
         # ── GUI ───────────────────────────────────────────────────────────────
-        "show_gui": True,                # set to False to run headless
+        "show_gui": True,               # headless for batch dataset generation
 
         # ── Output ────────────────────────────────────────────────────────────
-        "output_dir":    r"C:\Users\coetech\Documents\PyMechanical\Outputs",
-        "project_name":  "cantilever_harmonic",
-        "image_name":    "meshed_beam.png",
-        "bc_image_name": "bc_view.png",
-        "csv_name":      "nodal_displacement_complex.csv",
+        "output_dir": r"C:\Users\coetech\Documents\PyMechanical\Outputs",
+        "csv_name":   "run_temp.csv",
 
+        # ── Damage sweep ──────────────────────────────────────────────────────
+        "damage_zone_frac":      0.05,                # width of damage zone as fraction of beam length
+        "damage_locations_frac": [0.25, 0.50, 0.75],  # damage center positions (fraction of beam length)
+        "damage_severities":     [0.10, 0.25, 0.50],  # stiffness reductions (10%, 25%, 50%)
+        "dataset_csv":           r"C:\Users\coetech\Documents\PyMechanical\Outputs\dataset.csv",
     }
+
+    dataset_csv = config["dataset_csv"]
 
     # ── Setup (runs once) ─────────────────────────────────────────────────────
     mech = setup_session_and_model(config)
@@ -59,7 +58,6 @@ if __name__ == "__main__":
     setup_harmonic_analysis(config, mech)
     setup_mesh(config, mech)
     check_model_info(config, mech)
-    export_geometry_image(config, mech)
 
     # ── Fixed support: select all nodes at z=0 ────────────────────────────────
     fix_support_script = """
@@ -85,14 +83,12 @@ sel_info.Ids = {support_node_ids}
 selection_manager.ClearSelection()
 selection_manager.NewSelection(sel_info)
 
-# Create NamedSelections branch if it doesn't exist
 ns_container = model.NamedSelections
 if ns_container is None:
     dummy = model.AddNamedSelection()
     dummy.Delete()
     ns_container = model.NamedSelections
 
-# Delete existing NS with same name if present
 for ns in list(ns_container.Children):
     if ns.Name == "NS_SUPPORT_FACE":
         ns.Delete()
@@ -108,10 +104,7 @@ result
     print("Mechanical says (support NS):", out)
     add_fixed_on_support_face(config, mech)
 
-    # ── Modal analysis to find natural frequencies ────────────────────────────
-    run_modal_analysis(config, mech)
-
-    # ── Pick the tip node on the top face (max Z) ─────────────────────────────
+    # ── Pick tip node (max Z on top face) ─────────────────────────────────────
     top_nodes = get_top_face_nodes(mech)
 
     find_tip_script = f"""
@@ -126,22 +119,48 @@ result
     out = mech.run_python_script(find_tip_script)
     tip_info = json.loads(out)
     tip_node_id = tip_info["id"]
-    print(f"Tip node selected: ID={tip_node_id}, X={tip_info['x']:.6f}, Y={tip_info['y']:.6f}, Z={tip_info['z']:.6f} m")
+    print(f"Tip node: ID={tip_node_id}, Z={tip_info['z']:.6f} m")
 
-
-    # ── Apply force at tip node ───────────────────────────────────────────────
     select_node_by_id(mech, tip_node_id, "FORCE_NODE")
     add_nodal_force(config, mech)
-    export_bc_view(config, mech)
 
-    # ── Solve and export ──────────────────────────────────────────────────────
-    solve_model(config, mech)
-    export_complex_displacement(config, mech)
-    print_solve_output(mech)
+    # ── Append healthy baseline from existing Test_Run_2 output ───────────────
+    healthy_csv = "nodal_displacement_complex.csv"
+    healthy_path = os.path.join(config["output_dir"], healthy_csv)
+    if not os.path.exists(healthy_path):
+        raise FileNotFoundError(
+            f"Healthy baseline not found: {healthy_path}\n"
+            "Run Test_Run_2.py first to generate the healthy beam data."
+        )
+    print(f"\nUsing existing healthy baseline: {healthy_path}")
+    append_to_dataset(config, healthy_csv, dataset_csv,
+                      damage_location_mm=0.0, damage_severity=0.0, label="healthy")
+
+    # ── Damage sweep ──────────────────────────────────────────────────────────
+    for loc_frac in config["damage_locations_frac"]:
+        for severity in config["damage_severities"]:
+            print(f"\n=== Damage: location={loc_frac:.0%} of beam, severity={severity:.0%} ===")
+            config["damage_location_frac"] = loc_frac
+            config["damage_severity"]      = severity
+
+            # Apply damage BEFORE solving
+            info = apply_damage_apdl(config, mech)
+
+            temp_csv = f"run_dmg_loc{int(loc_frac * 100):03d}_sev{int(severity * 100):03d}.csv"
+            config["csv_name"] = temp_csv
+            solve_model(config, mech)
+            export_complex_displacement(config, mech)
+            append_to_dataset(config, temp_csv, dataset_csv,
+                              damage_location_mm=info["damage_center_mm"],
+                              damage_severity=severity,
+                              label="damaged")
+
+            remove_damage_apdl(mech)
+
+    print(f"\nDataset generation complete. Output: {dataset_csv}")
 
     # ── Inspect in Mechanical GUI before closing ──────────────────────────────
     input("Press Enter to close Mechanical when you are done inspecting...")
 
-    # ── Save and close ────────────────────────────────────────────────────────
-    # save_project(config, mech)  # uncomment after PC restart clears lock
+    # ── Close ─────────────────────────────────────────────────────────────────
     close_mechanical(config, mech)
