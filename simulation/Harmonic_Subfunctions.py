@@ -564,6 +564,271 @@ result
 #
 # =============================================================================
 
+def export_centerline_displacement(config, mechanical):
+    """
+    Export complex nodal displacements for centerline nodes only.
+    Centerline = nodes at max Y (top face) and center X.
+    Same schema as export_complex_displacement:
+      freq_Hz,node_id,x,y,z,ux_real,ux_imag,uy_real,uy_imag,uz_real,uz_imag
+    Produces a much smaller file (~50-100 nodes vs 4000+) capturing the
+    full mode shape along the beam length.
+    """
+    script = r"""
+def export_centerline(analysis, out_dir, csv_name):
+    import mech_dpf
+    import Ans.DataProcessing as dpf
+    import os
+
+    def get_field_data(dataSource, set_id):
+        time_scoping = dpf.Scoping()
+        time_scoping.Location = ""
+        time_scoping.Ids = [set_id]
+        u_op = dpf.operators.result.displacement()
+        u_op.inputs.data_sources.Connect(dataSource)
+        u_op.inputs.time_scoping.Connect(time_scoping)
+        u_fc = u_op.outputs.fields_container.GetData()
+        if not u_fc:
+            return None, None
+        u_field = u_fc[0]
+        if not hasattr(u_field, "Scoping") or not hasattr(u_field, "Data"):
+            return None, None
+        return u_field.Scoping.Ids, u_field.Data
+
+    try:
+        mech_dpf.setExtAPI(ExtAPI)
+        dataSource = dpf.DataSources(analysis.ResultFileName)
+        model_dpf = dpf.Model(dataSource)
+        tfs = model_dpf.TimeFreqSupport
+        n_sets = tfs.NumberSets
+        if n_sets == 0:
+            return "ERROR: No frequency sets in result file"
+
+        n_freqs = n_sets // 2
+        freqs = [tfs.GetTimeFreq(i * 2) for i in range(n_freqs)]
+
+        mesh_data = analysis.MeshData
+        all_nodes = mesh_data.Nodes
+
+        # Identify centerline nodes: max Y and center X
+        max_y   = max(n.Y for n in all_nodes)
+        min_x   = min(n.X for n in all_nodes)
+        max_x   = max(n.X for n in all_nodes)
+        center_x = (min_x + max_x) / 2.0
+        tol = 0.01  # mm tolerance
+
+        centerline_ids = set(
+            n.Id for n in all_nodes
+            if abs(n.Y - max_y) < tol and abs(n.X - center_x) < tol
+        )
+
+        if not centerline_ids:
+            return "ERROR: No centerline nodes found (check tolerance)"
+
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
+
+        csv_path = os.path.join(out_dir, csv_name)
+
+        with open(csv_path, "w") as f:
+            f.write("freq_Hz,node_id,x,y,z,ux_real,ux_imag,uy_real,uy_imag,uz_real,uz_imag\n")
+
+            for freq_idx in range(n_freqs):
+                freq_hz = freqs[freq_idx]
+                real_set = freq_idx * 2 + 1
+                imag_set = freq_idx * 2 + 2
+
+                real_ids, real_data = get_field_data(dataSource, real_set)
+                imag_ids, imag_data = get_field_data(dataSource, imag_set)
+
+                if real_ids is None:
+                    continue
+
+                imag_lookup = {}
+                if imag_ids is not None and imag_data is not None:
+                    for i, nid in enumerate(imag_ids):
+                        imag_lookup[nid] = (
+                            imag_data[i * 3],
+                            imag_data[i * 3 + 1],
+                            imag_data[i * 3 + 2],
+                        )
+
+                for i, nid in enumerate(real_ids):
+                    if nid not in centerline_ids:
+                        continue
+                    try:
+                        node = mesh_data.NodeById(nid)
+                    except:
+                        continue
+
+                    ux_r = real_data[i * 3]
+                    uy_r = real_data[i * 3 + 1]
+                    uz_r = real_data[i * 3 + 2]
+                    ux_im, uy_im, uz_im = imag_lookup.get(nid, (0.0, 0.0, 0.0))
+
+                    f.write("{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10}\n".format(
+                        freq_hz, nid,
+                        node.X, node.Y, node.Z,
+                        ux_r, ux_im,
+                        uy_r, uy_im,
+                        uz_r, uz_im,
+                    ))
+
+        return "OK: centerline displacements exported to {} ({} nodes)".format(csv_path, len(centerline_ids))
+
+    except Exception as e:
+        return "ERROR in centerline export: {}".format(e)
+
+analysis = DataModel.AnalysisList[0]
+out_dir  = r""" + repr(config.get("output_dir", r"C:\Users\coetech\Documents\PyMechanical\Outputs")) + r"""
+csv_name = r""" + repr(config.get("centerline_csv_name", "nodal_displacement_centerline.csv")) + r"""
+result = export_centerline(analysis, out_dir, csv_name)
+result
+"""
+    out = mechanical.run_python_script(script)
+    print("Mechanical says (export centerline displacements):", out)
+
+# =============================================================================
+#
+# =============================================================================
+
+def export_aggregate_frf(config, mechanical):
+    """
+    Export per-frequency aggregate statistics across all centerline nodes.
+    One row per frequency — much smaller than node-level exports.
+    Schema:
+      freq_Hz, uy_tip_real, uy_tip_imag, uy_tip_amplitude,
+      uy_max_amplitude, uy_mean_amplitude
+    Where:
+      - tip = centerline node at max Z (beam free end)
+      - amplitude = sqrt(real^2 + imag^2)
+      - max/mean computed across all centerline nodes at that frequency
+    """
+    script = r"""
+def export_aggregate(analysis, out_dir, csv_name):
+    import mech_dpf
+    import Ans.DataProcessing as dpf
+    import os
+    import math
+
+    def get_field_data(dataSource, set_id):
+        time_scoping = dpf.Scoping()
+        time_scoping.Location = ""
+        time_scoping.Ids = [set_id]
+        u_op = dpf.operators.result.displacement()
+        u_op.inputs.data_sources.Connect(dataSource)
+        u_op.inputs.time_scoping.Connect(time_scoping)
+        u_fc = u_op.outputs.fields_container.GetData()
+        if not u_fc:
+            return None, None
+        u_field = u_fc[0]
+        if not hasattr(u_field, "Scoping") or not hasattr(u_field, "Data"):
+            return None, None
+        return u_field.Scoping.Ids, u_field.Data
+
+    try:
+        mech_dpf.setExtAPI(ExtAPI)
+        dataSource = dpf.DataSources(analysis.ResultFileName)
+        model_dpf = dpf.Model(dataSource)
+        tfs = model_dpf.TimeFreqSupport
+        n_sets = tfs.NumberSets
+        if n_sets == 0:
+            return "ERROR: No frequency sets in result file"
+
+        n_freqs = n_sets // 2
+        freqs = [tfs.GetTimeFreq(i * 2) for i in range(n_freqs)]
+
+        mesh_data = analysis.MeshData
+        all_nodes = mesh_data.Nodes
+
+        # Identify centerline nodes and tip node
+        max_y    = max(n.Y for n in all_nodes)
+        min_x    = min(n.X for n in all_nodes)
+        max_x    = max(n.X for n in all_nodes)
+        center_x = (min_x + max_x) / 2.0
+        tol = 0.01  # mm
+
+        centerline_nodes = [
+            n for n in all_nodes
+            if abs(n.Y - max_y) < tol and abs(n.X - center_x) < tol
+        ]
+
+        if not centerline_nodes:
+            return "ERROR: No centerline nodes found"
+
+        tip_node = max(centerline_nodes, key=lambda n: n.Z)
+        tip_id   = tip_node.Id
+        centerline_ids = set(n.Id for n in centerline_nodes)
+
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
+
+        csv_path = os.path.join(out_dir, csv_name)
+
+        with open(csv_path, "w") as f:
+            f.write("freq_Hz,uy_tip_real,uy_tip_imag,uy_tip_amplitude,uy_max_amplitude,uy_mean_amplitude\n")
+
+            for freq_idx in range(n_freqs):
+                freq_hz  = freqs[freq_idx]
+                real_set = freq_idx * 2 + 1
+                imag_set = freq_idx * 2 + 2
+
+                real_ids, real_data = get_field_data(dataSource, real_set)
+                imag_ids, imag_data = get_field_data(dataSource, imag_set)
+
+                if real_ids is None:
+                    continue
+
+                imag_lookup = {}
+                if imag_ids is not None and imag_data is not None:
+                    for i, nid in enumerate(imag_ids):
+                        imag_lookup[nid] = (
+                            imag_data[i * 3 + 1],  # uy only
+                        )
+
+                uy_tip_real = uy_tip_imag = 0.0
+                amplitudes = []
+
+                for i, nid in enumerate(real_ids):
+                    if nid not in centerline_ids:
+                        continue
+                    uy_r  = real_data[i * 3 + 1]
+                    uy_im = imag_lookup.get(nid, (0.0,))[0]
+                    amp   = math.sqrt(uy_r * uy_r + uy_im * uy_im)
+                    amplitudes.append(amp)
+
+                    if nid == tip_id:
+                        uy_tip_real = uy_r
+                        uy_tip_imag = uy_im
+
+                uy_tip_amp  = math.sqrt(uy_tip_real**2 + uy_tip_imag**2)
+                uy_max_amp  = max(amplitudes) if amplitudes else 0.0
+                uy_mean_amp = sum(amplitudes) / len(amplitudes) if amplitudes else 0.0
+
+                f.write("{0},{1},{2},{3},{4},{5}\n".format(
+                    freq_hz,
+                    uy_tip_real, uy_tip_imag, uy_tip_amp,
+                    uy_max_amp, uy_mean_amp,
+                ))
+
+        return "OK: aggregate FRF exported to {} ({} centerline nodes, {} freqs)".format(
+            csv_path, len(centerline_ids), n_freqs)
+
+    except Exception as e:
+        return "ERROR in aggregate FRF export: {}".format(e)
+
+analysis = DataModel.AnalysisList[0]
+out_dir  = r""" + repr(config.get("output_dir", r"C:\Users\coetech\Documents\PyMechanical\Outputs")) + r"""
+csv_name = r""" + repr(config.get("aggregate_csv_name", "frf_aggregate.csv")) + r"""
+result = export_aggregate(analysis, out_dir, csv_name)
+result
+"""
+    out = mechanical.run_python_script(script)
+    print("Mechanical says (export aggregate FRF):", out)
+
+# =============================================================================
+#
+# =============================================================================
+
 def get_top_face_nodes(mechanical):
     """
     Returns a list of node IDs on the top face (max Y) of the beam.

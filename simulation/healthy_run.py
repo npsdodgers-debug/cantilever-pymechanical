@@ -18,6 +18,8 @@ from Harmonic_Subfunctions import (
     save_project,
     close_mechanical,
     export_complex_displacement,
+    export_centerline_displacement,
+    export_aggregate_frf,
     get_top_face_nodes,
     select_node_by_id,
     run_modal_analysis,
@@ -49,7 +51,9 @@ if __name__ == "__main__":
         "project_name":  "cantilever_harmonic",
         "image_name":    "meshed_beam.png",
         "bc_image_name": "bc_view.png",
-        "csv_name":      "nodal_displacement_complex.csv",
+        "csv_name":              "nodal_displacement_complex.csv",
+        "centerline_csv_name":   "nodal_displacement_centerline.csv",
+        "aggregate_csv_name":    "frf_aggregate.csv",
 
     }
 
@@ -136,7 +140,9 @@ result
 
     # ── Solve and export ──────────────────────────────────────────────────────
     solve_model(config, mech)
-    export_complex_displacement(config, mech)
+    export_complex_displacement(config, mech)       # all nodes — full dataset
+    export_centerline_displacement(config, mech)    # top centerline nodes only
+    export_aggregate_frf(config, mech)              # one row per frequency
     print_solve_output(mech)
 
     # ── Inspect in Mechanical GUI before closing ──────────────────────────────
