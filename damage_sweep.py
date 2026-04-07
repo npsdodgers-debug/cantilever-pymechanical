@@ -37,20 +37,21 @@ if __name__ == "__main__":
         "remote_named_selection": "FORCE_NODE",
 
         # ── GUI ───────────────────────────────────────────────────────────────
-        "show_gui": True,               # headless for batch dataset generation
+        "show_gui": False,               # headless for batch dataset generation
 
         # ── Output ────────────────────────────────────────────────────────────
         "output_dir": r"C:\Users\coetech\Documents\PyMechanical\Outputs",
         "csv_name":   "run_temp.csv",
 
         # ── Damage sweep ──────────────────────────────────────────────────────
-        "damage_zone_frac":      0.05,                # width of damage zone as fraction of beam length
+        "damage_zone_frac":      0.05,                 # damage zone width as fraction of beam length
         "damage_locations_frac": [0.25, 0.50, 0.75],  # damage center positions (fraction of beam length)
         "damage_severities":     [0.10, 0.25, 0.50],  # stiffness reductions (10%, 25%, 50%)
         "dataset_csv":           r"C:\Users\coetech\Documents\PyMechanical\Outputs\dataset.csv",
     }
 
     dataset_csv = config["dataset_csv"]
+    n_configs = len(config["damage_locations_frac"]) * len(config["damage_severities"])
 
     # ── Setup (runs once) ─────────────────────────────────────────────────────
     mech = setup_session_and_model(config)
@@ -119,7 +120,7 @@ result
     out = mech.run_python_script(find_tip_script)
     tip_info = json.loads(out)
     tip_node_id = tip_info["id"]
-    print(f"Tip node: ID={tip_node_id}, Z={tip_info['z']:.6f} m")
+    print(f"Tip node: ID={tip_node_id}, Z={tip_info['z']:.6f} mm")
 
     select_node_by_id(mech, tip_node_id, "FORCE_NODE")
     add_nodal_force(config, mech)
@@ -137,13 +138,14 @@ result
                       damage_location_mm=0.0, damage_severity=0.0, label="healthy")
 
     # ── Damage sweep ──────────────────────────────────────────────────────────
+    run_idx = 0
     for loc_frac in config["damage_locations_frac"]:
         for severity in config["damage_severities"]:
-            print(f"\n=== Damage: location={loc_frac:.0%} of beam, severity={severity:.0%} ===")
+            run_idx += 1
+            print(f"\n=== [{run_idx}/{n_configs}] Damage: location={loc_frac:.0%}, severity={severity:.0%} ===")
             config["damage_location_frac"] = loc_frac
             config["damage_severity"]      = severity
 
-            # Apply damage BEFORE solving
             info = apply_damage_apdl(config, mech)
 
             temp_csv = f"run_dmg_loc{int(loc_frac * 100):03d}_sev{int(severity * 100):03d}.csv"
@@ -157,10 +159,7 @@ result
 
             remove_damage_apdl(mech)
 
-    print(f"\nDataset generation complete. Output: {dataset_csv}")
+    print(f"\nSweep complete: {n_configs} damage configs + 1 healthy baseline")
+    print(f"Dataset: {dataset_csv}")
 
-    # ── Inspect in Mechanical GUI before closing ──────────────────────────────
-    input("Press Enter to close Mechanical when you are done inspecting...")
-
-    # ── Close ─────────────────────────────────────────────────────────────────
     close_mechanical(config, mech)
