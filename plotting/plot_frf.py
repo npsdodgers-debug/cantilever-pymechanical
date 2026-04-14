@@ -87,20 +87,23 @@ else:
 # =============================================================================
 # Plot 1: FRF Amplitude vs Frequency
 # =============================================================================
+tip_node = z_node_map[max(z_vals)]
+freqs_tip, amp_tip, _, _, _ = get_frf(tip_node)
+
 fig, ax = plt.subplots(figsize=(10, 6))
-for z, nid in zip(selected_z, selected_nodes):
-    freqs, amp, _, _, _ = get_frf(nid)
-    ax.plot(freqs, amp, marker="o", markersize=3, label=f"z={z:.1f} mm (node {nid})")
+ax.plot(freqs_tip, amp_tip, marker="o", markersize=4, color="steelblue",
+        linewidth=1.5, label=f"Tip node (z={max(z_vals):.1f} mm)")
 
-for i, mf in enumerate(modal_freqs):
-    ax.axvline(x=mf, color="gray", linestyle="--", linewidth=0.8,
-               label=f"Mode {i+1}: {mf:.1f} Hz")
+# for i, mf in enumerate(modal_freqs):
+#     ax.axvline(x=mf, color="gray", linestyle="--", linewidth=0.8,
+#                label=f"Mode {i+1}: {mf:.1f} Hz")
 
+ax.set_yscale("log")
 ax.set_xlabel("Frequency (Hz)")
 ax.set_ylabel("Displacement Amplitude |uy| (mm)")
-ax.set_title("FRF Amplitude — Y Displacement vs Frequency (Healthy Beam)")
-ax.legend(fontsize=7)
-ax.grid(True)
+ax.set_title("FRF Amplitude — Tip Node (Healthy Beam)")
+ax.legend(fontsize=8)
+ax.grid(True, which="both")
 plt.tight_layout()
 plt.savefig(os.path.join(out_dir, "FRF_amplitude.png"), dpi=150)
 plt.show()

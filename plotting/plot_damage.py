@@ -114,8 +114,8 @@ for color, sev in zip(sev_colors, all_sevs):
         freqs, amp, _, _ = get_frf(tip_node, damage_groups[key])
         ax1.plot(freqs, amp, color=color, linewidth=1.5,
                  linestyle="--", marker=".", markersize=3, label=f"Severity {sev:.0%}")
-for mf in modal_freqs:
-    ax1.axvline(x=mf, color="gray", linestyle=":", linewidth=0.8)
+# for mf in modal_freqs:
+#     ax1.axvline(x=mf, color="gray", linestyle=":", linewidth=0.8)
 ax1.set_xlabel("Frequency (Hz)")
 ax1.set_ylabel("Displacement Amplitude |uy| (mm)")
 ax1.set_title(f"Varying Severity\n(damage loc = {mid_loc:.1f} mm)")
@@ -132,8 +132,8 @@ for color, loc in zip(loc_colors, all_locs):
         freqs, amp, _, _ = get_frf(tip_node, damage_groups[key])
         ax2.plot(freqs, amp, color=color, linewidth=1.5,
                  linestyle="--", marker=".", markersize=3, label=f"Loc {loc:.1f} mm")
-for mf in modal_freqs:
-    ax2.axvline(x=mf, color="gray", linestyle=":", linewidth=0.8)
+# for mf in modal_freqs:
+#     ax2.axvline(x=mf, color="gray", linestyle=":", linewidth=0.8)
 ax2.set_xlabel("Frequency (Hz)")
 ax2.set_title(f"Varying Location\n(severity = {mid_sev:.0%})")
 ax2.legend(fontsize=8)

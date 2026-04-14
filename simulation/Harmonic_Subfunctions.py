@@ -327,7 +327,9 @@ settings.RangeMinimum = Quantity("{f_start} [Hz]")
 settings.RangeMaximum = Quantity("{f_end} [Hz]")
 settings.SolutionIntervals = {n_steps}
 
-result = "OK: harmonic reset range {f_start}-{f_end} Hz, steps={n_steps}"
+settings.StructuralDampingCoefficient = 0.01
+
+result = "OK: harmonic reset range {f_start}-{f_end} Hz, steps={n_steps}, damping=1%"
 result
 """
     out = mechanical.run_python_script(script)
