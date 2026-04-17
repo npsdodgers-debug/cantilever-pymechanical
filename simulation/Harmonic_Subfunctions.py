@@ -339,6 +339,69 @@ result
 #
 # =============================================================================
 
+def add_apdl_imaginary_export(config, mechanical):
+    """
+    Adds an APDL Commands snippet to the Harmonic Response solution that
+    exports imaginary nodal displacements to CSV after solving.
+    Frequencies are derived from the config to match the harmonic analysis.
+    """
+    f_start  = float(config.get("f_start_hz", 10.0))
+    f_end    = float(config.get("f_end_hz", 5000.0))
+    n_points = int(config.get("n_points", 100))
+    out_dir  = config.get("output_dir", r"C:\Users\coetech\Documents\PyMechanical\Outputs")
+    csv_stem = config.get("imag_csv_name", "nodal_imag_apdl")
+
+    # Step size matching the harmonic analysis spacing
+    freq_step = (f_end - f_start) / max(n_points - 1, 1)
+    csv_path  = out_dir.replace("\\", "/") + "/" + csv_stem
+
+    apdl = f"""
+/POST1
+FREQ_MIN = {f_start}
+FREQ_MAX = {f_end}
+FREQ_STEP = {freq_step:.4f}
+
+*CFOPEN,'{csv_path}','csv',,
+*VWRITE,'Freq(Hz)','Node','X-Coord','Y-Coord','Z-Coord','X-Disp.','Y-Disp.','Z-Disp.'
+(A15,A15,A15,A15,A15,A15,A15,A15)
+
+*GET,NNODES,NODE,0,COUNT
+
+*DO,FREQ,FREQ_MIN,FREQ_MAX,FREQ_STEP
+    set,,,,IMAG,FREQ
+    *DO,N,1,NNODES,1
+        *GET,XCOORD,NODE,N,LOC,X
+        *GET,YCOORD,NODE,N,LOC,Y
+        *GET,ZCOORD,NODE,N,LOC,Z
+        *GET,XDISP,NODE,N,U,X
+        *GET,YDISP,NODE,N,U,Y
+        *GET,ZDISP,NODE,N,U,Z
+        *VWRITE,FREQ,N,XCOORD,YCOORD,ZCOORD,XDISP,YDISP,ZDISP
+        (G15.5,',',G15.5,',',G15.5,',',G15.5,',',G15.5,',',E15.7,',',E15.7,',',E15.7)
+    *ENDDO
+*ENDDO
+
+*CFCLOS
+"""
+
+    script = f"""
+for analysis in Model.Analyses:
+    if analysis.Name.startswith("Harmonic"):
+        snippet = analysis.Solution.AddCommandSnippet()
+        snippet.Input = {repr(apdl)}
+        result = "OK: APDL imaginary export snippet added"
+        break
+else:
+    result = "ERROR: No harmonic analysis found"
+result
+"""
+    out = mechanical.run_python_script(script)
+    print("Mechanical says (APDL snippet):", out)
+
+# =============================================================================
+#
+# =============================================================================
+
 def solve_model(config, mechanical):
     script = """
 analysis = Model.Analyses[0]
@@ -490,11 +553,16 @@ def extract_all_freq_nodal_displacement(analysis, out_dir, csv_name):
         if n_sets == 0:
             return "ERROR: No frequency sets in result file"
 
-        # In Ansys harmonic results, sets come in pairs:
-        # odd sets = real part, even sets = imaginary part
-        # Number of frequencies = n_sets / 2
+        # Diagnostic: print set layout to understand real/imag ordering
+        diag = "n_sets={} | ".format(n_sets)
+        for i in range(min(6, n_sets)):
+            diag += "set{}={}Hz ".format(i+1, round(tfs.GetTimeFreq(i), 2))
+        print(diag)
+
+        # Ansys harmonic: all real sets first, then all imaginary sets
+        # Sets 1..n_freqs = real parts, sets n_freqs+1..2*n_freqs = imaginary parts
         n_freqs = n_sets // 2
-        freqs = [tfs.GetTimeFreq(i * 2) for i in range(n_freqs)]
+        freqs = [tfs.GetTimeFreq(i) for i in range(n_freqs)]
 
         mesh_data = analysis.MeshData
 
@@ -508,8 +576,8 @@ def extract_all_freq_nodal_displacement(analysis, out_dir, csv_name):
 
             for freq_idx in range(n_freqs):
                 freq_hz = freqs[freq_idx]
-                real_set = freq_idx * 2 + 1  # 1-based odd set = real
-                imag_set = freq_idx * 2 + 2  # 1-based even set = imaginary
+                real_set = freq_idx + 1            # 1-based: 1, 2, 3 ... n_freqs
+                imag_set = freq_idx + 1 + n_freqs  # 1-based: n_freqs+1, n_freqs+2 ...
 
                 real_ids, real_data = get_field_data(dataSource, real_set)
                 imag_ids, imag_data = get_field_data(dataSource, imag_set)
@@ -561,6 +629,140 @@ result
 """
     out = mechanical.run_python_script(script)
     print("Mechanical says (export all freq complex displacements):", out)
+
+# =============================================================================
+#
+# =============================================================================
+
+def export_real_displacement(config, mechanical):
+    """
+    Export real-part-only nodal displacements to a separate CSV.
+    Uses same DPF extraction as export_complex_displacement but writes
+    only the real components.
+    Schema: freq_Hz, node_id, x, y, z, ux_real, uy_real, uz_real
+    """
+    script = r"""
+def extract_real_displacement(analysis, out_dir, csv_name):
+    import mech_dpf
+    import Ans.DataProcessing as dpf
+    import os
+
+    def get_field_data(dataSource, set_id):
+        time_scoping = dpf.Scoping()
+        time_scoping.Location = ""
+        time_scoping.Ids = [set_id]
+        u_op = dpf.operators.result.displacement()
+        u_op.inputs.data_sources.Connect(dataSource)
+        u_op.inputs.time_scoping.Connect(time_scoping)
+        u_fc = u_op.outputs.fields_container.GetData()
+        if not u_fc:
+            return None, None
+        u_field = u_fc[0]
+        if not hasattr(u_field, "Scoping") or not hasattr(u_field, "Data"):
+            return None, None
+        return u_field.Scoping.Ids, u_field.Data
+
+    try:
+        mech_dpf.setExtAPI(ExtAPI)
+        dataSource = dpf.DataSources(analysis.ResultFileName)
+        model = dpf.Model(dataSource)
+        tfs = model.TimeFreqSupport
+        n_sets = tfs.NumberSets
+        if n_sets == 0:
+            return "ERROR: No frequency sets found"
+
+        n_freqs = n_sets
+        freqs = [tfs.GetTimeFreq(i) for i in range(n_freqs)]
+        mesh_data = analysis.MeshData
+
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
+
+        csv_path = os.path.join(out_dir, csv_name)
+        with open(csv_path, "w") as f:
+            f.write("freq_Hz,node_id,x,y,z,ux_real,uy_real,uz_real\n")
+            for freq_idx in range(n_freqs):
+                freq_hz = freqs[freq_idx]
+                real_set = freq_idx + 1
+                real_ids, real_data = get_field_data(dataSource, real_set)
+                if real_ids is None:
+                    continue
+                for i, nid in enumerate(real_ids):
+                    try:
+                        node = mesh_data.NodeById(nid)
+                    except:
+                        continue
+                    f.write("{},{},{},{},{},{},{},{}\n".format(
+                        freq_hz, nid, node.X, node.Y, node.Z,
+                        real_data[i*3], real_data[i*3+1], real_data[i*3+2]
+                    ))
+        return "OK: real displacement exported to {}".format(csv_path)
+    except Exception as e:
+        return "ERROR: {}".format(e)
+
+analysis = DataModel.AnalysisList[0]
+out_dir = r""" + repr(config.get("output_dir", r"C:\Users\coetech\Documents\PyMechanical\Outputs")) + r"""
+csv_name = r""" + repr(config.get("real_csv_name", "nodal_displacement_real.csv")) + r"""
+result = extract_real_displacement(analysis, out_dir, csv_name)
+result
+"""
+    out = mechanical.run_python_script(script)
+    print("Mechanical says (export real displacements):", out)
+
+# =============================================================================
+#
+# =============================================================================
+
+def merge_real_imag_csv(config):
+    """
+    Merges the real-only CSV (from DPF) and imaginary-only CSV (from APDL)
+    into a single combined CSV matched on node_id and nearest frequency.
+    Output schema: freq_Hz, node_id, x, y, z, ux_real, uy_real, uz_real,
+                   ux_imag, uy_imag, uz_imag
+    """
+    import pandas as pd
+    import os
+
+    out_dir      = config.get("output_dir", r"C:\Users\coetech\Documents\PyMechanical\Outputs")
+    real_name    = config.get("real_csv_name", "nodal_displacement_real.csv")
+    imag_name    = config.get("imag_csv_name", "notch_imag_apdl") + ".csv"
+    combined_name = config.get("csv_name", "notch_displacement_complex.csv")
+
+    real_path    = os.path.join(out_dir, real_name)
+    imag_path    = os.path.join(out_dir, imag_name)
+    combined_path = os.path.join(out_dir, combined_name)
+
+    real_df = pd.read_csv(real_path)
+    imag_df = pd.read_csv(imag_path, skiprows=1, header=None, sep=',',
+                          names=['freq_Hz','node_id','x','y','z','ux_imag','uy_imag','uz_imag'])
+    imag_df = imag_df.apply(lambda col: pd.to_numeric(col.astype(str).str.strip(), errors='coerce'))
+    imag_df = imag_df.dropna(subset=['freq_Hz','node_id'])
+
+    # Map each real frequency to the nearest APDL frequency
+    real_freqs = sorted(real_df['freq_Hz'].unique())
+    imag_freqs = sorted(imag_df['freq_Hz'].dropna().unique())
+
+    freq_map = {}
+    for rf in real_freqs:
+        closest = min(imag_freqs, key=lambda x: abs(x - rf))
+        freq_map[rf] = closest
+
+    print(f"Matched {len(freq_map)} of {len(real_freqs)} frequencies")
+
+    rows = []
+    for real_freq, imag_freq in freq_map.items():
+        r = real_df[real_df['freq_Hz'] == real_freq].set_index('node_id')
+        im = imag_df[abs(imag_df['freq_Hz'] - imag_freq) < 0.01].set_index('node_id')
+        merged = r.join(im[['ux_imag','uy_imag','uz_imag']], how='inner')
+        merged['freq_Hz'] = real_freq
+        rows.append(merged.reset_index())
+
+    combined = pd.concat(rows, ignore_index=True)
+    combined = combined[['freq_Hz','node_id','x','y','z',
+                          'ux_real','uy_real','uz_real',
+                          'ux_imag','uy_imag','uz_imag']]
+    combined.to_csv(combined_path, index=False)
+    print(f"Combined CSV saved: {combined_path} ({len(combined):,} rows)")
 
 # =============================================================================
 #
