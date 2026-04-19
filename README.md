@@ -20,10 +20,10 @@ Simulate healthy and damaged cantilever beam configurations to build a labeled t
 simulation/
     Harmonic_Subfunctions.py    — all shared helper functions
     healthy_run.py              — healthy beam simulation
-    notch_run.py                — geometric notch damage simulation
     excitation_sweep.py         — sweep force location along beam
-    damage_single.py            — single damage configuration run
-    damage_sweep.py             — sweep damage location and severity
+    geometry_damage_notch.py    — damage via physical notch geometry (.stp)
+    material_damage_single.py   — damage via Young's modulus reduction, single run
+    material_damage_sweep.py    — damage via Young's modulus reduction, sweep locations x severities
 
 plotting/
     validate_complex_extraction.py  — verify real/imaginary extraction physics
@@ -39,11 +39,11 @@ plotting/
 ## Run Order
 
 ```
-1. healthy_run.py          →  baseline healthy beam FRF
-2. excitation_sweep.py     →  FRF at multiple excitation locations
-3. notch_run.py            →  geometric notch damage FRF
-4. damage_single.py        →  single material-reduction damage run
-5. damage_sweep.py         →  sweep damage location × severity (known bug on run 2)
+1. healthy_run.py                →  baseline healthy beam FRF
+2. excitation_sweep.py           →  FRF at multiple excitation locations
+3. geometry_damage_notch.py      →  geometric notch damage FRF
+4. material_damage_single.py     →  single Young's modulus reduction damage run
+5. material_damage_sweep.py      →  sweep damage location x severity (known bug on run 2)
 ```
 
 ## Imaginary Extraction Pipeline
@@ -92,9 +92,9 @@ freq_Hz, node_id, x, y, z, ux_real, uy_real, uz_real, ux_imag, uy_imag, uz_imag
 
 ## Damage Simulation
 
-**Geometric notch** (`notch_run.py`): imports a pre-cut notch geometry (`.stp`). Confirmed Mode 1 drops from 15.7 Hz → 13.9 Hz due to stiffness reduction.
+**Geometric notch** (`geometry_damage_notch.py`): imports a pre-cut notch geometry (`.stp`). Confirmed Mode 1 drops from 15.7 Hz → 13.9 Hz due to stiffness reduction.
 
-**Material reduction** (`damage_single.py`, `damage_sweep.py`): reduces Young's modulus in a localized zone using a named selection and material assignment.
+**Material reduction** (`material_damage_single.py`, `material_damage_sweep.py`): reduces Young's modulus in a localized zone using a named selection and material assignment.
 
 ```python
 "damage_locations_frac": [0.25, 0.50, 0.75],  # fraction of beam length
