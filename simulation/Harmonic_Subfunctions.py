@@ -938,8 +938,8 @@ def export_aggregate(analysis, out_dir, csv_name):
         if n_sets == 0:
             return "ERROR: No frequency sets in result file"
 
-        n_freqs = n_sets // 2
-        freqs = [tfs.GetTimeFreq(i * 2) for i in range(n_freqs)]
+        n_freqs = n_sets
+        freqs = [tfs.GetTimeFreq(i) for i in range(n_freqs)]
 
         mesh_data = analysis.MeshData
         all_nodes = mesh_data.Nodes
@@ -973,11 +973,11 @@ def export_aggregate(analysis, out_dir, csv_name):
 
             for freq_idx in range(n_freqs):
                 freq_hz  = freqs[freq_idx]
-                real_set = freq_idx * 2 + 1
-                imag_set = freq_idx * 2 + 2
+                real_set = freq_idx + 1
+                imag_set = None  # imaginary handled by APDL pipeline
 
                 real_ids, real_data = get_field_data(dataSource, real_set)
-                imag_ids, imag_data = get_field_data(dataSource, imag_set)
+                imag_ids, imag_data = None, None
 
                 if real_ids is None:
                     continue
