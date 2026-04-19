@@ -36,9 +36,9 @@ if __name__ == "__main__":
         "element_size": 1.6e-3,          # meters
 
         # ── Harmonic analysis ─────────────────────────────────────────────────
-        "f_start_hz": 01.0,
-        "f_end_hz":   1000.0,
-        "n_points":   200,
+        "f_start_hz": 10.0,
+        "f_end_hz":   5000.0,
+        "n_points":   50,
 
         # ── Force ─────────────────────────────────────────────────────────────
         "force_value_N":           1.0,  # amplitude, Y-direction
@@ -56,8 +56,6 @@ if __name__ == "__main__":
         "csv_name":              "nodal_displacement_complex.csv",
         "centerline_csv_name":   "nodal_displacement_centerline.csv",
         "aggregate_csv_name":    "frf_aggregate.csv",
-        "imag_csv_name":         "healthy_imag_apdl",
-        "real_csv_name":         "healthy_displacement_real.csv",
 
     }
 
