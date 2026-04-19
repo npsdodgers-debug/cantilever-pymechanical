@@ -56,6 +56,8 @@ if __name__ == "__main__":
         "csv_name":              "nodal_displacement_complex.csv",
         "centerline_csv_name":   "nodal_displacement_centerline.csv",
         "aggregate_csv_name":    "frf_aggregate.csv",
+        "imag_csv_name":         "healthy_imag_apdl",
+        "real_csv_name":         "healthy_displacement_real.csv",
 
     }
 
