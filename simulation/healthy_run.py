@@ -38,7 +38,7 @@ if __name__ == "__main__":
         # ── Harmonic analysis ─────────────────────────────────────────────────
         "f_start_hz": 10.0,
         "f_end_hz":   5000.0,
-        "n_points":   50,
+        "n_points":   150,
 
         # ── Force ─────────────────────────────────────────────────────────────
         "force_value_N":           1.0,  # amplitude, Y-direction
