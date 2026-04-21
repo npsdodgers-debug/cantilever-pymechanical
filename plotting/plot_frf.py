@@ -21,7 +21,7 @@ with open(csv_path, newline="") as f:
     for row in reader:
         rows.append({
             "freq_Hz":  float(row["freq_Hz"]),
-            "node_id":  int(row["node_id"]),
+            "node_id":  int(float(row["node_id"])),
             "x":        float(row["x"]),
             "y":        float(row["y"]),
             "z":        float(row["z"]),
@@ -105,7 +105,7 @@ ax.set_title("FRF Amplitude — Tip Node (Healthy Beam)")
 ax.legend(fontsize=8)
 ax.grid(True, which="both")
 plt.tight_layout()
-plt.savefig(os.path.join(out_dir, "FRF_amplitude.png"), dpi=150)
+# plt.savefig(os.path.join(out_dir, "FRF_amplitude.png"), dpi=150)
 plt.show()
 plt.close(fig)
 print("Saved: FRF_amplitude.png")
@@ -132,7 +132,7 @@ axes[1].legend(fontsize=8)
 axes[1].grid(True)
 
 plt.tight_layout()
-plt.savefig(os.path.join(out_dir, "FRF_tip_real_imag.png"), dpi=150)
+# plt.savefig(os.path.join(out_dir, "FRF_tip_real_imag.png"), dpi=150)
 plt.show()
 plt.close(fig)
 print("Saved: FRF_tip_real_imag.png")
@@ -151,7 +151,7 @@ ax.set_title("FRF Phase vs Frequency (Healthy Beam)")
 ax.legend(fontsize=7)
 ax.grid(True)
 plt.tight_layout()
-plt.savefig(os.path.join(out_dir, "FRF_phase.png"), dpi=150)
+# plt.savefig(os.path.join(out_dir, "FRF_phase.png"), dpi=150)
 plt.show()
 plt.close(fig)
 print("Saved: FRF_phase.png")
@@ -186,7 +186,7 @@ ax.set_ylabel("Displacement Amplitude |uy| (mm)")
 ax.set_title("Spatial FRF — Displacement Shape Along Beam (Healthy Beam)")
 ax.grid(True)
 plt.tight_layout()
-plt.savefig(os.path.join(out_dir, "FRF_mode_shape.png"), dpi=150)
+# plt.savefig(os.path.join(out_dir, "FRF_mode_shape.png"), dpi=150)
 plt.show()
 plt.close(fig)
 print("Saved: FRF_mode_shape.png")

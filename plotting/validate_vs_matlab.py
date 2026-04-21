@@ -89,6 +89,6 @@ ax.grid(True, which='both', alpha=0.3)
 
 plt.tight_layout()
 out_path = os.path.join(OUTPUT_DIR, "validate_vs_matlab.png")
-plt.savefig(out_path, dpi=150)
+# plt.savefig(out_path, dpi=150)
 print(f"\nPlot saved to: {out_path}")
 plt.show()

@@ -94,7 +94,7 @@ axes[2].set_title("Magnitude = sqrt(real² + imag²)")
 
 plt.tight_layout()
 out_path = os.path.join(OUTPUT_DIR, "validate_complex_tip_node.png")
-plt.savefig(out_path, dpi=150)
+# plt.savefig(out_path, dpi=150)
 print(f"\nPlot saved to: {out_path}")
 plt.show()
 
