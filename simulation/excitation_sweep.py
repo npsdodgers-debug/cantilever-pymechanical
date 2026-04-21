@@ -39,7 +39,7 @@ if __name__ == "__main__":
         # ── Harmonic analysis ─────────────────────────────────────────────────
         "f_start_hz": 1.0,
         "f_end_hz":   1000.0,
-        "n_points":   50,
+        "n_points":   200,
 
         # ── Force ─────────────────────────────────────────────────────────────
         "force_value_N":          1.0,
@@ -189,6 +189,11 @@ result
         config["imag_csv_name"]       = f"healthy_{label}_imag_apdl"
         config["real_csv_name"]       = f"healthy_{label}_real.csv"
         config["bc_image_name"]       = f"healthy_{label}_bc.png"
+        # Skip if already completed
+        complex_csv = os.path.join(config["output_dir"], config["csv_name"])
+        if os.path.exists(complex_csv):
+            print(f"  Skipping {label} — output already exists: {config['csv_name']}")
+            continue
 
         # Apply force and solve
         select_node_by_id(mech, exc_node_id, "FORCE_NODE")
