@@ -28,12 +28,13 @@ simulation/
 plotting/
     validate_complex_extraction.py  — verify real/imaginary extraction physics
     validate_vs_matlab.py           — compare FRF peaks to MATLAB analytical solution
+    plot_frf.py                     — general healthy beam FRF plotting (amplitude, phase, mode shapes)
     plot_excitation_comparison.py   — compare FRF at different excitation locations
+    plot_notch_comparison.py        — healthy vs notch FRF comparison (magnitude + phase)
     plot_centerline.py              — plot centerline displacement mode shapes
-    plot_single_damage.py           — healthy vs notch FRF comparison
-    plot_frf.py                     — general FRF plotting
-    plot_damage.py                  — healthy vs damaged FRF comparison
-    plot_notch.py                   — notch beam FRF plots
+    plot_notch.py                   — notch beam FRF plots (real/imag + amplitude)
+    plot_single_damage.py           — healthy vs notch tip node comparison (kept for material damage use)
+    plot_material_damage.py         — healthy vs material damage sweep (requires dataset.csv from material_damage_sweep.py)
 ```
 
 ## Run Order

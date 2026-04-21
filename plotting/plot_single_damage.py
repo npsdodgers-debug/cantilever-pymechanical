@@ -1,3 +1,18 @@
+"""
+plot_single_damage.py
+
+Compares the healthy beam FRF against a single damaged beam FRF at the tip node.
+Currently configured to compare against the notch geometry damage (notch_displacement_complex.csv)
+but can be pointed at any damage CSV by changing the damage_csv path in the config.
+
+Produces two plots:
+  1. Amplitude (log scale) — healthy vs damaged
+  2. Real & Imaginary parts + amplitude — healthy vs damaged
+
+Note: plot_notch_comparison.py covers similar ground with a magnitude + phase layout.
+This script is kept for material damage comparisons when that data becomes available.
+"""
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
