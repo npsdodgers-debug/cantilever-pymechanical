@@ -89,6 +89,8 @@ freq_Hz, node_id, x, y, z, ux_real, uy_real, uz_real, ux_imag, uy_imag, uz_imag
 
 **Geometric notch** (`geometry_damage_notch.py`): imports a pre-cut notch geometry (`.stp`). Confirmed Mode 1 drops from 15.7 Hz → 13.9 Hz due to stiffness reduction.
 
+> **Note:** Material property-based damage simulations (Young's modulus reduction) are not part of the current project scope but are preserved in the `damage-simulation` branch for potential future use.
+
 ## Requirements
 
 - Ansys Mechanical 2025 R2 (v252) with valid license
