@@ -1,10 +1,10 @@
 # cantilever-pymechanical
 
-An automated simulation pipeline using Ansys PyMechanical to generate labeled Frequency Response Function (FRF) datasets for a thin cantilever beam. Active research project at Texas A&M University targeting AI-based structural health monitoring (SHM).
+An automated simulation pipeline using Ansys PyMechanical to generate Frequency Response Function (FRF) datasets for a thin cantilever beam. Active research project at Texas A&M University.
 
 ## Project Goal
 
-Simulate healthy and damaged cantilever beam configurations to build a labeled training dataset for an AI model capable of detecting structural defects from FRF data. The approach mirrors what a Polytec Scanning Laser Vibrometer measures experimentally — generated fully in simulation.
+Simulate healthy and notch-damaged cantilever beam configurations and extract complex FRF data (real + imaginary displacement) for analysis.
 
 ## Beam Specifications
 
@@ -22,8 +22,6 @@ simulation/
     healthy_run.py              — healthy beam simulation
     excitation_sweep.py         — sweep force location along beam
     geometry_damage_notch.py    — damage via physical notch geometry (.stp)
-    material_damage_single.py   — damage via Young's modulus reduction, single run
-    material_damage_sweep.py    — damage via Young's modulus reduction, sweep locations x severities
 
 plotting/
     validate_complex_extraction.py  — verify real/imaginary extraction physics
@@ -33,8 +31,6 @@ plotting/
     plot_notch_comparison.py        — healthy vs notch FRF comparison (magnitude + phase)
     plot_centerline.py              — plot centerline displacement mode shapes
     plot_notch.py                   — notch beam FRF plots (real/imag + amplitude)
-    plot_single_damage.py           — healthy vs notch tip node comparison (kept for material damage use)
-    plot_material_damage.py         — healthy vs material damage sweep (requires dataset.csv from material_damage_sweep.py)
 ```
 
 ## Run Order
@@ -43,8 +39,6 @@ plotting/
 1. healthy_run.py                →  baseline healthy beam FRF
 2. excitation_sweep.py           →  FRF at multiple excitation locations
 3. geometry_damage_notch.py      →  geometric notch damage FRF
-4. material_damage_single.py     →  single Young's modulus reduction damage run
-5. material_damage_sweep.py      →  sweep damage location x severity (known bug on run 2)
 ```
 
 ## Imaginary Extraction Pipeline
@@ -95,14 +89,6 @@ freq_Hz, node_id, x, y, z, ux_real, uy_real, uz_real, ux_imag, uy_imag, uz_imag
 
 **Geometric notch** (`geometry_damage_notch.py`): imports a pre-cut notch geometry (`.stp`). Confirmed Mode 1 drops from 15.7 Hz → 13.9 Hz due to stiffness reduction.
 
-**Material reduction** (`material_damage_single.py`, `material_damage_sweep.py`): reduces Young's modulus in a localized zone using a named selection and material assignment.
-
-```python
-"damage_locations_frac": [0.25, 0.50, 0.75],  # fraction of beam length
-"damage_severities":     [0.10, 0.25, 0.50],  # fraction of E removed
-"damage_zone_frac":      0.05,                 # damage zone width (5% of beam length)
-```
-
 ## Requirements
 
 - Ansys Mechanical 2025 R2 (v252) with valid license
@@ -129,6 +115,4 @@ config = {
 
 ## Known Limitations
 
-- `damage_sweep.py` crashes on run 2 with "Unable to import material(s)" — under investigation
 - Mesh node coordinates are returned in **mm** (not meters)
-- `Material.Delete()` unavailable in PyMechanical 0.11.0 — damage materials accumulate across runs but are harmless
